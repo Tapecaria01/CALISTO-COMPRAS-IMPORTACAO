@@ -38,7 +38,7 @@ def ler_pdf_totvs(arquivo, filial):
         for page in reader.pages:
             text += page.extract_text(extraction_mode='layout') + "\n"
         
-        # Regex para capturar as colunas do seu modelo
+        # Regex para capturar as colunas do modelo TOTVS da Calisto
         for linha in text.split('\n'):
             m = re.search(r'^\s*(\d{4,5})\s+(.+?)\s+(MT/\d+|CX|PCT|UN)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)', linha)
             if m:
@@ -74,6 +74,12 @@ def consolidar_estoque(lista_dfs):
 # ==========================================
 # MENU LATERAL (SIDEBAR)
 # ==========================================
+# INCLUSÃO DA LOGO AQUI:
+try:
+    st.sidebar.image("PASSALACQUA_Logo-Calisto&Co.png", use_column_width=True)
+except:
+    st.sidebar.title("Calisto & Co.")
+
 st.sidebar.title("⚙️ Compras Calisto")
 menu = st.sidebar.radio("Navegação", [
     "📊 Dashboard e Alertas", 
@@ -85,18 +91,18 @@ menu = st.sidebar.radio("Navegação", [
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Parâmetros de Cálculo")
-multiplicador = st.sidebar.number_input("Multiplicador da Média", min_value=1.0, value=2.0, step=0.5, help="Multiplica a coluna 'Média' para projetar a necessidade.")
+multiplicador = st.sidebar.number_input("Multiplicador da Média", min_value=1.0, value=2.0, step=0.5, help="Multiplica a coluna 'Média' para projetar a necessidade de compras.")
 
 # ==========================================
 # TELA 1: IMPORTAÇÃO TOTVS
 # ==========================================
 if menu == "📥 1. Importar TOTVS (PDFs)":
     st.header("Importação de Estoque e Vendas (TOTVS)")
-    st.info("Faça o upload dos 5 PDFs referentes às filiais. O sistema consolidará os dados.")
+    st.info("Faça o upload dos 5 PDFs referentes às filiais. O sistema consolidará os dados automaticamente.")
     
     col1, col2 = st.columns(2)
     with col1: pdf_matriz = st.file_uploader("PDF Matriz", type=['pdf'])
-    with col1: pdf_ribeirao = st.file_uploader("PDF Ribeirão (Álvaro)", type=['pdf'])
+    with col1: pdf_ribeirao = st.file_uploader("PDF Ribeirão (Álvaro de Lima)", type=['pdf'])
     with col1: pdf_franca = st.file_uploader("PDF Franca", type=['pdf'])
     with col2: pdf_bh = st.file_uploader("PDF BH", type=['pdf'])
     with col2: pdf_londrina = st.file_uploader("PDF Londrina", type=['pdf'])
@@ -112,15 +118,15 @@ if menu == "📥 1. Importar TOTVS (PDFs)":
         if dfs:
             df_consolidado = consolidar_estoque(dfs)
             st.session_state.estoque_df = df_consolidado
-            registrar_log("Importação TOTVS", f"Importados {len(dfs)} arquivos. Total de SKUs: {len(df_consolidado)}.")
+            registrar_log("Importação TOTVS", f"Importados {len(dfs)} arquivos. Total de SKUs lidos: {len(df_consolidado)}.")
             st.success("Dados importados e consolidados com sucesso!")
         else:
             st.warning("Nenhum arquivo enviado.")
             
-    # Melhoria 3: Manual de Correção de Itens no Estoque
     if not st.session_state.estoque_df.empty:
+        st.markdown("---")
         st.subheader("Edição Manual de Estoque (Correção)")
-        st.caption("Altere os valores na tabela abaixo caso o TOTVS tenha trazido algo incorreto. As alterações são salvas automaticamente.")
+        st.caption("Altere os valores na tabela abaixo caso o TOTVS tenha trazido algum dado divergente. As alterações são aplicadas na hora.")
         st.session_state.estoque_df = st.data_editor(st.session_state.estoque_df, num_rows="dynamic", key="editor_estoque")
 
 # ==========================================
@@ -129,37 +135,41 @@ if menu == "📥 1. Importar TOTVS (PDFs)":
 elif menu == "🚢 2. Gestão de Pedidos (Fornecedores)":
     st.header("Adicionar e Editar Pedidos de Fornecedores")
     
-    # Importar novo Excel
     st.subheader("Importar Excel de Fornecedor")
     upload_fornecedor = st.file_uploader("Suba o Excel do Pedido", type=['xlsx', 'xls'])
+    
     if upload_fornecedor:
         nome_arquivo = upload_fornecedor.name
-        # Melhoria 2: Evitar duplicatas
+        # Evitar duplicatas perguntando se quer atualizar
         if nome_arquivo in st.session_state.pedidos_dict:
-            st.warning(f"O arquivo {nome_arquivo} já foi importado. Deseja sobrescrever?")
+            st.warning(f"O arquivo '{nome_arquivo}' já foi importado anteriormente. Deseja atualizar?")
             if st.button("Sim, atualizar pedido"):
-                df_forn = pd.read_excel(upload_fornecedor)
-                # Adicionando colunas de controle marítimo exigidas
-                for col in ["PRODUCAO_CHINA", "PREVISAO_EMBARQUE", "PREVISAO_CHEGADA", "QTD_PEDIDO"]:
-                    if col not in df_forn.columns: df_forn[col] = ""
-                st.session_state.pedidos_dict[nome_arquivo] = df_forn
-                registrar_log("Atualização de Pedido", f"{nome_arquivo} atualizado.")
-                st.success("Atualizado!")
+                xls = pd.ExcelFile(upload_fornecedor)
+                for sheet_name in xls.sheet_names:
+                    df_forn = pd.read_excel(xls, sheet_name=sheet_name)
+                    # Colunas vitais
+                    for col in ["PRODUCAO_CHINA", "PREVISAO_EMBARQUE", "PREVISAO_CHEGADA", "QTD_PEDIDO"]:
+                        if col not in df_forn.columns: df_forn[col] = 0 if col in ["PRODUCAO_CHINA", "QTD_PEDIDO"] else ""
+                    st.session_state.pedidos_dict[f"{nome_arquivo} - {sheet_name}"] = df_forn
+                registrar_log("Atualização de Pedido", f"Pedido {nome_arquivo} atualizado.")
+                st.success("Pedido atualizado com sucesso!")
         else:
-            df_forn = pd.read_excel(upload_fornecedor)
-            for col in ["PRODUCAO_CHINA", "PREVISAO_EMBARQUE", "PREVISAO_CHEGADA", "QTD_PEDIDO"]:
-                if col not in df_forn.columns: df_forn[col] = ""
-            st.session_state.pedidos_dict[nome_arquivo] = df_forn
-            registrar_log("Novo Pedido", f"{nome_arquivo} importado.")
-            st.success("Pedido adicionado com sucesso!")
+            xls = pd.ExcelFile(upload_fornecedor)
+            for sheet_name in xls.sheet_names:
+                df_forn = pd.read_excel(xls, sheet_name=sheet_name)
+                for col in ["PRODUCAO_CHINA", "PREVISAO_EMBARQUE", "PREVISAO_CHEGADA", "QTD_PEDIDO"]:
+                    if col not in df_forn.columns: df_forn[col] = 0 if col in ["PRODUCAO_CHINA", "QTD_PEDIDO"] else ""
+                st.session_state.pedidos_dict[f"{nome_arquivo} - {sheet_name}"] = df_forn
+            registrar_log("Novo Pedido", f"Arquivo {nome_arquivo} importado.")
+            st.success("Pedido adicionado com sucesso! Cada aba virou um fornecedor/seção.")
 
-    # Edição Manual das Abas de Fornecedores
+    # Edição Manual das Abas
     if st.session_state.pedidos_dict:
         st.markdown("---")
-        st.subheader("Edição de Dados de Embarque por Fornecedor")
-        fornecedor_selecionado = st.selectbox("Selecione o fornecedor/pedido para editar:", list(st.session_state.pedidos_dict.keys()))
+        st.subheader("Painel de Edição: Embarque e Produção")
+        fornecedor_selecionado = st.selectbox("Selecione a aba do fornecedor para editar as datas e quantidades:", list(st.session_state.pedidos_dict.keys()))
         
-        st.caption("Edite as datas de Produção, Embarque e Chegada, além da Quantidade diretamente na tabela.")
+        st.caption("Você pode editar as datas de 'Previsão Embarque', 'Previsão Chegada' e as quantidades diretamente na tabela abaixo.")
         df_edit = st.data_editor(st.session_state.pedidos_dict[fornecedor_selecionado], num_rows="dynamic")
         st.session_state.pedidos_dict[fornecedor_selecionado] = df_edit
 
@@ -170,7 +180,7 @@ elif menu == "🛒 3. Sugestão de Compras (Consolidado)":
     st.header("Análise Inteligente e Sugestão de Compras")
     
     if st.session_state.estoque_df.empty:
-        st.warning("Importe os dados do TOTVS primeiro.")
+        st.warning("Para gerar as sugestões, importe os PDFs do TOTVS na aba 1 primeiro.")
     else:
         df_sugestao = st.session_state.estoque_df.copy()
         
@@ -178,7 +188,6 @@ elif menu == "🛒 3. Sugestão de Compras (Consolidado)":
         df_sugestao['TRANSITO_OU_PRODUCAO'] = 0
         for nome_forn, df_forn in st.session_state.pedidos_dict.items():
             if 'CODIGO' in df_forn.columns and 'QTD_PEDIDO' in df_forn.columns:
-                # Soma as quantidades baseadas no código do produto
                 df_forn['QTD_PEDIDO'] = pd.to_numeric(df_forn['QTD_PEDIDO'], errors='coerce').fillna(0)
                 agrupado = df_forn.groupby('CODIGO')['QTD_PEDIDO'].sum().reset_index()
                 df_sugestao = pd.merge(df_sugestao, agrupado, on='CODIGO', how='left')
@@ -187,32 +196,39 @@ elif menu == "🛒 3. Sugestão de Compras (Consolidado)":
                 df_sugestao = df_sugestao.drop(columns=['QTD_PEDIDO'])
         
         # Cálculos de Sugestão
-        df_sugestao['NECESSIDADE_PROJETADA'] = df_sugestao['MEDIA_TOTAL'] * multiplicador
-        df_sugestao['DISPONIVEL_TOTAL'] = df_sugestao['ESTOQUE_TOTAL'] + df_sugestao['TRANSITO_OU_PRODUCAO']
-        df_sugestao['SUGESTAO_COMPRA'] = df_sugestao['NECESSIDADE_PROJETADA'] - df_sugestao['DISPONIVEL_TOTAL']
-        df_sugestao['SUGESTAO_COMPRA'] = df_sugestao['SUGESTAO_COMPRA'].apply(lambda x: x if x > 0 else 0)
+        df_sugestao['MÉDIA_PROJETADA'] = df_sugestao['MEDIA_TOTAL'] * multiplicador
+        df_sugestao['DISPONIBILIDADE_TOTAL'] = df_sugestao['ESTOQUE_TOTAL'] + df_sugestao['TRANSITO_OU_PRODUCAO']
+        df_sugestao['SUGESTÃO_COMPRA'] = df_sugestao['MÉDIA_PROJETADA'] - df_sugestao['DISPONIBILIDADE_TOTAL']
+        df_sugestao['SUGESTÃO_COMPRA'] = df_sugestao['SUGESTÃO_COMPRA'].apply(lambda x: x if x > 0 else 0)
         
-        # Status Crítico
-        df_sugestao['STATUS'] = df_sugestao.apply(lambda row: '🔴 Crítico' if row['DISPONIVEL_TOTAL'] < row['MEDIA_TOTAL'] else ('🟢 OK' if row['SUGESTAO_COMPRA'] == 0 else '🟡 Atenção'), axis=1)
+        # Define Status
+        df_sugestao['STATUS'] = df_sugestao.apply(lambda row: '🔴 Crítico' if row['DISPONIBILIDADE_TOTAL'] < row['MEDIA_TOTAL'] else ('🟢 OK' if row['SUGESTÃO_COMPRA'] == 0 else '🟡 Atenção'), axis=1)
 
-        # Melhoria 4: Filtros Avançados
+        # Filtros Avançados
+        st.subheader("Filtros Avançados")
         col_f1, col_f2 = st.columns(2)
-        status_filter = col_f1.multiselect("Filtrar por Status", ['🔴 Crítico', '🟡 Atenção', '🟢 OK'], default=['🔴 Crítico', '🟡 Atenção', '🟢 OK'])
-        sugestao_minima = col_f2.number_input("Ocultar sugestões menores que:", value=0)
+        status_filter = col_f1.multiselect("Filtrar por Status de Cobertura", ['🔴 Crítico', '🟡 Atenção', '🟢 OK'], default=['🔴 Crítico', '🟡 Atenção', '🟢 OK'])
+        sugestao_minima = col_f2.number_input("Ocultar sugestões de compra menores que (Unidades):", value=0)
         
-        df_filtrado = df_sugestao[(df_sugestao['STATUS'].isin(status_filter)) & (df_sugestao['SUGESTAO_COMPRA'] >= sugestao_minima)]
+        df_filtrado = df_sugestao[(df_sugestao['STATUS'].isin(status_filter)) & (df_sugestao['SUGESTÃO_COMPRA'] >= sugestao_minima)]
         
-        st.dataframe(df_filtrado, use_container_width=True)
+        # Mostra a tabela editável
+        st.data_editor(df_filtrado, use_container_width=True, hide_index=True)
 
-        # Exportação para Excel
+        # Download do Excel
         @st.cache_data
         def converter_df_excel(df):
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Sugestao Geral')
+                df.to_excel(writer, index=False, sheet_name='Sugestao_Geral')
             return output.getvalue()
         
-        st.download_button(label="📥 Exportar Sugestão para Excel", data=converter_df_excel(df_filtrado), file_name="Sugestao_Compras_Calisto.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button(
+            label="📥 Baixar Planilha Consolidada (Excel)", 
+            data=converter_df_excel(df_filtrado), 
+            file_name=f"Sugestao_Calisto_{datetime.datetime.now().strftime('%Y%m%d')}.xlsx", 
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 # ==========================================
 # TELA 4: DASHBOARD E ALERTAS
@@ -223,23 +239,25 @@ elif menu == "📊 Dashboard e Alertas":
     if st.session_state.estoque_df.empty:
         st.info("Importe os dados do TOTVS para visualizar os gráficos e alertas.")
     else:
-        # Melhoria 6: Alertas Automáticos (Cards)
         df_dash = st.session_state.estoque_df
         total_skus = len(df_dash)
         total_estoque = df_dash['ESTOQUE_TOTAL'].sum() if 'ESTOQUE_TOTAL' in df_dash.columns else 0
         
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("SKUs Gerenciados", f"{total_skus}")
-        c2.metric("Volume Total em Estoque", f"{total_estoque:,.0f}")
-        c3.metric("Fornecedores Ativos", len(st.session_state.pedidos_dict))
+        # Cards Rápidos
+        c1, c2, c3 = st.columns(3)
+        c1.metric("📦 SKUs Gerenciados", f"{total_skus}")
+        c2.metric("🏢 Volume Total em Estoque", f"{total_estoque:,.0f}")
+        c3.metric("🚢 Abas de Fornecedores Ativas", len(st.session_state.pedidos_dict))
         
-        # Melhoria 5: Gráficos
+        st.markdown("---")
+        
+        # Gráficos
         st.subheader("Cobertura de Estoque por Filial")
         cols_filiais = [c for c in df_dash.columns if 'ESTOQUE_' in c and c != 'ESTOQUE_TOTAL']
         if cols_filiais:
             df_melt = df_dash.melt(id_vars=['DESCRICAO'], value_vars=cols_filiais, var_name='Filial', value_name='Qtd')
             df_melt['Filial'] = df_melt['Filial'].str.replace('ESTOQUE_', '')
-            fig = px.bar(df_melt.groupby('Filial')['Qtd'].sum().reset_index(), x='Filial', y='Qtd', color='Filial', title="Estoque Atual por Filial")
+            fig = px.bar(df_melt.groupby('Filial')['Qtd'].sum().reset_index(), x='Filial', y='Qtd', color='Filial', title="Estoque Atual Total por Filial")
             st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
@@ -248,18 +266,16 @@ elif menu == "📊 Dashboard e Alertas":
 elif menu == "💾 4. Histórico e Backup":
     st.header("Histórico de Ações e Backup de Dados")
     
-    # Melhoria 1: Histórico de Importação
-    st.subheader("Log de Eventos")
+    st.subheader("Log de Eventos (Rastreabilidade)")
     if st.session_state.import_log:
         st.dataframe(pd.DataFrame(st.session_state.import_log), use_container_width=True)
     else:
-        st.write("Nenhum evento registrado ainda.")
+        st.write("Nenhum evento registrado na sessão atual.")
 
     st.markdown("---")
     
-    # Melhoria 7: Backup Completo em JSON
     st.subheader("Backup Total do Sistema")
-    st.write("Baixe todo o estado atual (Tabelas do TOTVS, Fornecedores e Logs) para salvar seu trabalho.")
+    st.write("Exporte todo o estado atual (Tabelas do TOTVS, Dados dos Fornecedores e Histórico) para salvar o seu trabalho e carregar amanhã.")
     
     estado_para_salvar = {
         "estoque_df": st.session_state.estoque_df.to_json(orient='records') if not st.session_state.estoque_df.empty else "[]",
@@ -268,15 +284,19 @@ elif menu == "💾 4. Histórico e Backup":
     }
     
     json_string = json.dumps(estado_para_salvar, indent=4)
-    st.download_button(label="📦 Fazer Backup do Sistema (.json)", data=json_string, file_name=f"backup_calisto_{datetime.datetime.now().strftime('%Y%m%d')}.json", mime="application/json")
+    st.download_button(label="📦 Baixar Backup do Sistema (.json)", data=json_string, file_name=f"backup_calisto_{datetime.datetime.now().strftime('%Y%m%d')}.json", mime="application/json")
     
+    st.markdown("---")
     st.subheader("Restaurar Backup")
-    arquivo_backup = st.file_uploader("Suba um arquivo .json de backup anterior", type=['json'])
+    arquivo_backup = st.file_uploader("Suba um arquivo .json de backup salvo anteriormente", type=['json'])
     if arquivo_backup is not None:
         if st.button("Restaurar Dados"):
-            dados_restaurados = json.load(arquivo_backup)
-            st.session_state.estoque_df = pd.read_json(io.StringIO(dados_restaurados['estoque_df']))
-            st.session_state.import_log = dados_restaurados['import_log']
-            st.session_state.pedidos_dict = {k: pd.read_json(io.StringIO(v)) for k, v in dados_restaurados['pedidos_dict'].items()}
-            registrar_log("Restauração de Backup", "Sistema restaurado via JSON.")
-            st.success("Sistema restaurado com sucesso! Navegue pelas abas para ver os dados.")
+            try:
+                dados_restaurados = json.load(arquivo_backup)
+                st.session_state.estoque_df = pd.read_json(io.StringIO(dados_restaurados['estoque_df']))
+                st.session_state.import_log = dados_restaurados['import_log']
+                st.session_state.pedidos_dict = {k: pd.read_json(io.StringIO(v)) for k, v in dados_restaurados['pedidos_dict'].items()}
+                registrar_log("Restauração de Backup", "Sistema restaurado via arquivo JSON.")
+                st.success("Sistema restaurado com sucesso! Navegue pelas abas ao lado.")
+            except Exception as e:
+                st.error(f"Erro ao tentar restaurar: {e}")
